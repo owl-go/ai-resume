@@ -222,6 +222,53 @@ test('PDF and DOCX round-trip with compensation and education above experience',
     assert.match(text.replace(/\s/g,''),/处理时间缩短20%，覆盖120家。.*效果数据待补充：核对统计口径。/);
   }
 }));
+test('every template exports complete PDF and Word content without changing the draft', async () => {
+  const {exportDocument} = require('../lib/resume-service');
+  const {layouts,templates} = require('../dist/resume-format');
+  const mammoth = require('mammoth'), parsePDF = require('pdf-parse');
+  assert.equal(Object.keys(layouts).length,12);
+  for (const key of ['classic','compact','editorial']) assert(Object.hasOwn(layouts,key));
+  const resume = {...exampleResult().resume,
+    projects:'库存项目 | 产品经理 | 2023.01–2024.01\n• 完成上线验收，覆盖120家。\n\n报表项目 | 产品经理 | 2024.02–2025.01\n• 效果数据待补充：请核对统计口径。\n• 【填写示例：上线后3个月，报表准备耗时由10分钟降至6分钟；请替换为真实数据】'};
+  const before = structuredClone(resume);
+  for (const layout of Object.keys(layouts)) {
+    assert(templates[layout].heading);
+    for (const format of ['pdf','docx']) {
+      const {bytes} = await exportDocument(format,resume,layout);
+      const extracted = format === 'pdf' ? (await parsePDF(bytes)).text : (await mammoth.extractRawText({buffer:bytes})).value;
+      const compactText = extracted.replace(/\s/g,'');
+      for (const expected of ['林知远','教育背景','库存项目','报表项目','覆盖120家','效果数据待补充：请核对统计口径。','【填写示例：上线后3个月，报表准备耗时由10分钟降至6分钟；请替换为真实数据】']) {
+        assert(compactText.includes(expected),`${layout}/${format} missing ${expected}`);
+      }
+    }
+  }
+  assert.deepEqual(resume,before);
+  const long = {...resume,projects:Array.from({length:20},(_,i) => `跨页项目${i} | 产品经理\n• 效果数据待补充：${'核对项目背景与个人贡献。'.repeat(10)}`).join('\n\n')};
+  for (const layout of ['cards','modern','sidebar']) {
+    const {bytes} = await exportDocument('pdf',long,layout);
+    const parsed = await parsePDF(bytes);
+    assert(parsed.numpages > 1);
+    assert(parsed.text.replace(/\s/g,'').includes('跨页项目19'));
+  }
+});
+test('illustrative metrics keep their yellow example tone apart from genuine achievements', () => {
+  const {lineSpans} = require('../dist/resume-format');
+  const example = '【填写示例：处理耗时由10分钟降至6分钟，减少40%；请替换为真实数据】';
+  const source = `• 覆盖120家客户；${example}；完成上线验收。`;
+  const spans = lineSpans(source,true);
+  assert.equal(spans.map(span => span.text).join(''),source);
+  assert.deepEqual(spans.filter(span => span.tone === 'example'),[{text:example,tone:'example'}]);
+  assert(spans.some(span => span.tone === 'result' && span.text === '120家'));
+  assert(!spans.some(span => span.tone === 'result' && /40%|10分钟|6分钟/.test(span.text)));
+  const evidence = '【填写示例：填写验收单日期和业务负责人的确认结论；请按实际情况填写】';
+  assert.deepEqual(lineSpans(evidence),[{text:evidence,tone:'example'}]);
+  assert.deepEqual(lineSpans(example+evidence).map(span => span.tone),['example','example']);
+  assert.deepEqual(lineSpans('【填写示例：减少40%',true),[{text:'【填写示例：减少40%',tone:'example'}]);
+  assert.equal(lineSpans('• 效果数据待补充：请核对统计口径。',true)[0].tone,'pending');
+  const confirmed = '• 处理耗时由10分钟降至6分钟，减少40%。';
+  assert(!lineSpans(confirmed,true).some(span => span.tone === 'example'));
+  assert(lineSpans(confirmed,true).some(span => span.tone === 'result' && span.text === '40%'));
+});
 test('chat, tailored analysis and refinement use the latest resume draft', async () => {
   const originalKey = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = 'synthetic-draft-key';
@@ -405,4 +452,283 @@ test('development rereads Markdown prompts and production uses the saved main pr
     }
     await fs.rm(directory, {recursive:true, force:true});
   }
+});
+
+test('credit conversion preserves fractional precision and rejects invalid settings or usage', async () => {
+  const {creditAmount,validateCreditRate,normalizeUsage}=require('../lib/resume-credits');
+  assert.deepEqual(creditAmount(10000),{creditUnits:'100000000',credits:1});
+  assert.equal(creditAmount(1).credits,.0001);
+  assert.equal(creditAmount(1,.0001).creditUnits,'1');
+  assert.equal(creditAmount(2500,1.25).credits,.3125);
+  for(const rate of [0,-1,NaN,Infinity,1000001,.00001,'1',1.000000001]) assert.throws(()=>validateCreditRate(rate));
+  assert.equal(normalizeUsage({prompt_tokens:500,completion_tokens:500,total_tokens:1000}).totalTokens,1000);
+  assert.equal(normalizeUsage({input_tokens:5,output_tokens:6}).totalTokens,11);
+  assert.equal(normalizeUsage({total_tokens:0}).totalTokens,0);
+  for(const value of [null,{}, {total_tokens:-1},{total_tokens:1.5},{total_tokens:'10'}, {prompt_tokens:1,completion_tokens:2,total_tokens:4}]) assert.equal(normalizeUsage(value),null);
+  await run(async base => {
+    assert.equal((await (await fetch(base+'/api/resume/settings')).json()).creditsPer10kTokens,1);
+    assert.equal((await post(base,'settings',{creditsPer10kTokens:.25})).status,200);
+    assert.equal((await (await fetch(base+'/api/resume/settings')).json()).creditsPer10kTokens,.25);
+    assert.equal((await post(base,'settings',{model:'credit-test-model'})).status,200);
+    assert.equal((await (await fetch(base+'/api/resume/settings')).json()).creditsPer10kTokens,.25);
+    assert.equal((await post(base,'settings',{creditsPer10kTokens:0})).status,400);
+    assert.equal((await post(base,'settings',{creditsPer10kTokens:1})).status,200);
+  });
+});
+
+test('credit ledger survives reopening, serializes writes, deduplicates IDs and preserves historical rates', async () => {
+  const {createUsageStore,normalizeUsage}=require('../lib/resume-credits');
+  const file=settingsPath.join(suiteSettingsDir,'credit-ledger','usage.jsonl');
+  const store=createUsageStore({file});
+  const entry=(id,tokens,rate=1)=>({id,operation:'chat',model:'test-model',outcome:'completed',creditsPer10kTokens:rate,usage:normalizeUsage({total_tokens:tokens})});
+  await Promise.all([store.record(entry('a',1000)),store.record(entry('b',2000)),store.record(entry('a',9000,10))]);
+  await store.record(entry('small',1,.0001));
+  await store.record({...entry('unknown',0),usage:null});
+  const summary=await createUsageStore({file}).summary();
+  assert.equal(summary.requests,4);
+  assert.equal(summary.reportedRequests,3);
+  assert.equal(summary.unreportedRequests,1);
+  assert.equal(summary.creditUnits,'30000001');
+  assert.equal(summary.credits,.30000001);
+  assert.equal(summary.records.find(row=>row.id==='a').credits,.1);
+  assert.equal(summary.records.find(row=>row.id==='unknown').credits,null);
+  assert.equal(summary.inputTokens,null);
+  const text=settingsFs.readFileSync(file,'utf8');
+  assert(!text.includes('apiKey')&&!text.includes('resume'));
+  if(process.platform!=='win32')assert.equal(settingsFs.statSync(file).mode & 0o777,0o600);
+});
+
+test('JSON and final SSE usage are metered once, missing usage stays unknown and failed results retain actual consumption', async () => {
+  const {createUsageStore}=require('../lib/resume-credits');
+  const file=settingsPath.join(suiteSettingsDir,'metered-api.jsonl');
+  const store=createUsageStore({file});
+  let mode='stream',calls=0;
+  const service=createResumeService({usageStore:store,fetchFn:async(_url,options)=>{
+    calls++;
+    const request=JSON.parse(options.body);
+    if(mode==='stream'){
+      assert.deepEqual(request.stream_options,{include_usage:true});
+      const usage={prompt_tokens:800,completion_tokens:200,total_tokens:1000};
+      const content=JSON.stringify({intent:'other',reply:'已完成。'});
+      const frames=[{choices:[{delta:{content}}],usage:null},{choices:[],usage},{choices:[],usage}];
+      return new Response(frames.map(frame=>'data: '+JSON.stringify(frame)+'\n\n').join('')+'data: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});
+    }
+    const output = mode==='analyze' ? exampleResult() : mode==='refine' ? {bullets:['参与采购流程设计。']} : mode==='test' ? {ok:true} : {intent:'other',reply:'普通回复。'};
+    const data={choices:[{message:{content:mode==='invalid'?'invalid json':JSON.stringify(output)}}]};
+    if(mode!=='missing')data.usage={prompt_tokens:500,completion_tokens:500,total_tokens:1000};
+    return new Response(JSON.stringify(data));
+  }});
+  await run(async base=>{
+    await post(base,'settings',{apiKey:'synthetic-credit-key',creditsPer10kTokens:1.5});
+    const response=await post(base,'chat',{message:'请说明简历结构'},{headers:{'Content-Type':'application/json','X-Resume-Request':'1',Accept:'application/x-ndjson'}});
+    const events=(await response.text()).trim().split('\n').map(JSON.parse);
+    const completed=events.find(event=>event.type==='result');
+    assert.equal(completed.consumption.credits,.15);
+    assert.equal(completed.consumption.usage.totalTokens,1000);
+    assert.equal((await store.summary()).requests,1);
+    await post(base,'settings',{creditsPer10kTokens:2});
+    mode='missing';
+    const missing=await (await post(base,'chat',{message:'继续说明'})).json();
+    assert.equal(missing.consumption.credits,null);
+    assert.equal(missing.consumption.usage,null);
+    mode='invalid';
+    assert.equal((await post(base,'chat',{message:'验证失败记录'})).status,502);
+    const summary=await (await fetch(base+'/api/resume/usage')).json();
+    assert.equal(summary.requests,3);
+    assert.equal(summary.totalTokens,2000);
+    assert.equal(summary.credits,.35);
+    assert.equal(summary.records[0].outcome,'failed');
+    assert.equal(summary.records[0].credits,.2);
+    assert.equal(summary.records[2].credits,.15);
+    assert.equal(calls,3);
+    mode='analyze';
+    assert.equal((await (await post(base,'analyze',{input:sample})).json()).consumption.credits,.2);
+    mode='refine';
+    assert.equal((await (await post(base,'refine',{input:sample,answers:[{question:'具体动作',answer:'参与采购流程设计。'}]})).json()).consumption.credits,.2);
+    mode='test';
+    assert.equal((await (await post(base,'test',{creditsPer10kTokens:10})).json()).consumption.credits,.2);
+    const all=await store.summary();
+    assert.equal(all.requests,6);
+    assert.equal(all.credits,.95);
+    assert.deepEqual(all.records.slice(0,3).map(row=>row.operation),['test','refine','analyze']);
+    assert.equal((await fetch(base+'/api/resume/usage',{headers:{Origin:'https://foreign.example'}})).status,403);
+    assert.equal((await post(base,'settings',{creditsPer10kTokens:1})).status,200);
+  },service);
+});
+
+test('a ledger write failure does not discard a valid model result', async () => {
+  const service=createResumeService({usageStore:{record:async()=>{throw new Error('synthetic disk failure');}},fetchFn:async()=>new Response(JSON.stringify({usage:{total_tokens:100},choices:[{message:{content:JSON.stringify({intent:'other',reply:'保留有效回复。'})}}]}))});
+  await run(async base=>{
+    const response=await post(base,'chat',{message:'请说明简历结构'});
+    assert.equal(response.status,200);
+    const value=await response.json();
+    assert.equal(value.result.reply,'保留有效回复。');
+    assert.equal(value.consumption.recorded,false);
+    assert.equal(value.consumption.credits,null);
+  },service);
+});
+
+
+test('appearance validates ranges and complete module ordering without changing content', async () => {
+  const {appearanceFor,orderedSections,presentationFor,sections}=require('../dist/resume-format');
+  const initial=appearanceFor();
+  assert.equal(initial.fontSize,12);
+  assert.equal(initial.margin,28);
+  for(const invalid of [{font:'unknown'},{font:'__proto__'},{fontSize:19},{fontSize:12.5},{margin:0},{lineHeight:NaN},{lineHeight:3},{accent:'red;display:none'},{sectionOrder:[]},{sectionOrder:null},{sectionOrder:Array(8).fill('summary')}]) assert.throws(()=>appearanceFor(invalid));
+  const order=sections.map(([key])=>key).reverse();
+  const value=appearanceFor({font:'serif',fontSize:14,lineHeight:1.8,margin:36,accent:'#8855aa',sectionOrder:order});
+  assert.deepEqual(orderedSections(value).map(([key])=>key),order);
+  assert.equal(presentationFor('blue',value).accent,'#8855aa');
+  assert.equal(presentationFor('blue',initial).accent,'#2857dc');
+  const {exportDocument}=require('../lib/resume-service');
+  const resume=exampleResult().resume, before=structuredClone(resume);
+  const parsePDF=require('pdf-parse'), mammoth=require('mammoth');
+  for(const format of ['pdf','docx']){
+    const {bytes}=await exportDocument(format,resume,'classic',value);
+    const text=format==='pdf'?(await parsePDF(bytes)).text:(await mammoth.extractRawText({buffer:bytes})).value;
+    assert(text.indexOf('技能工具')<text.indexOf('项目经历'));
+    assert(text.indexOf('项目经历')<text.indexOf('工作经历'));
+    assert(text.indexOf('工作经历')<text.indexOf('教育背景'));
+    assert(text.includes('林知远'));
+  }
+  assert.deepEqual(resume,before);
+  await run(async base=>assert.equal((await post(base,'export',{format:'pdf',resume,appearance:{accent:'<script>'}})).status,400));
+});
+
+test('expanded fonts export searchable Chinese and Latin text with the selected font faces', async () => {
+  const {fonts,appearanceFor}=require('../dist/resume-format');
+  const {exportDocument}=require('../lib/resume-service');
+  const parsePDF=require('pdf-parse'),mammoth=require('mammoth');
+  assert.equal(Object.keys(fonts).length,8);
+  const resume=exampleResult().resume;
+  resume.summary='中文经历：产品经理，熟悉 SQL、RAG 与 Agent；提升 20%。';
+  const original=structuredClone(resume);
+  for(const font of Object.keys(fonts)) {
+    assert.equal(appearanceFor({font}).font,font);
+    const pdf=await exportDocument('pdf',resume,'classic',{font,fontSize:11});
+    const text=(await parsePDF(pdf.bytes)).text.replace(/\s/g,'');
+    for(const value of ['林知远','中文经历','SQL','RAG','Agent','20%'])assert(text.includes(value),font+' missing '+value);
+    const docx=await exportDocument('docx',resume,'classic',{font,fontSize:11});
+    assert((await mammoth.extractRawText({buffer:docx.bytes})).value.includes(resume.summary));
+    const JSZip=require('jszip'),zip=await JSZip.loadAsync(docx.bytes);
+    const xml=await zip.file('word/document.xml').async('string');
+    assert(xml.includes(`w:ascii="${fonts[font].word}"`));
+    assert(xml.includes(`w:eastAsia="${fonts[font].cjk || fonts[font].word}"`));
+  }
+  assert.deepEqual(resume,original);
+});
+
+test('pasted image import uses multimodal input, preserves OCR text and records actual usage', async () => {
+  const {createUsageStore}=require('../lib/resume-credits');
+  const {imageDescriptor}=require('../lib/resume-image');
+  const store=createUsageStore({file:settingsPath.join(suiteSettingsDir,'ocr-usage.jsonl')});
+  const expected='岗位名称：AI 产品经理\n任职要求：3年以上经验，熟悉企业服务与 SQL。';
+  let calls=0,mode='ok';
+  const service=createResumeService({usageStore:store,fetchFn:async(_url,options)=>{
+    calls++;
+    const request=JSON.parse(options.body);
+    assert.match(request.messages[0].content,/只识别/);
+    assert(!request.messages[0].content.includes('填写示例：'));
+    const content=request.messages[1].content;
+    assert(Array.isArray(content));
+    assert.equal(content[0].type,'text');
+    assert.equal(content[1].type,'image_url');
+    assert.match(content[1].image_url.url,/^data:image\/(png|jpeg|webp);base64,/);
+    assert.equal(content[1].image_url.detail,'high');
+    if(mode==='unsupported')return new Response('not supported',{status:400});
+    const result={text:mode==='empty'?'':expected,kind:mode==='invalid'?'cover-letter':'jd'};
+    return new Response(JSON.stringify({usage:{prompt_tokens:400,completion_tokens:100,total_tokens:500},choices:[{message:{content:JSON.stringify(result)}}]}));
+  }});
+  const png=settingsFs.readFileSync(settingsPath.join(__dirname,'fixtures/pixel.png'));
+  await run(async base=>{
+    await post(base,'settings',{apiKey:'synthetic-ocr-key',creditsPer10kTokens:1});
+    const upload=async(bytes,name,kind='jd')=>{
+      const form=new FormData();form.set('resume',new Blob([bytes]),name);if(kind!==null)form.set('kind',kind);
+      return fetch(base+'/api/resume/import',{method:'POST',headers:{'X-Resume-Request':'1'},body:form});
+    };
+    for(const extension of ['png','jpg','webp']){
+      const bytes=settingsFs.readFileSync(settingsPath.join(__dirname,`fixtures/pixel.${extension}`));
+      const descriptor=imageDescriptor(bytes);assert.equal(descriptor.width,8);assert.equal(descriptor.height,8);
+      const response=await upload(bytes,`screenshot.${extension}`);
+      assert.equal(response.status,200);
+      const value=await response.json();assert.equal(value.text,expected);assert.equal(value.kind,'jd');assert.equal(value.type,'image');
+      assert.equal(value.consumption.credits,.05);assert.equal(value.mime,descriptor.mime);
+    }
+    assert.equal(calls,3);assert.equal((await store.summary()).credits,.15);
+    assert.equal((await upload(Buffer.from('not an image'),'fake.png')).status,400);
+    assert.equal((await upload(Buffer.from('<svg></svg>'),'fake.svg')).status,400);
+    const giant=Buffer.from(png);giant.writeUInt32BE(50000,16);
+    const invalidSize=await upload(giant,'giant.png');assert.equal(invalidSize.status,400);assert.equal((await invalidSize.json()).error.code,'IMAGE_TOO_LARGE');
+    assert.equal((await upload(png,'screenshot.png','other')).status,400);
+    assert.equal(calls,3);
+    mode='empty';assert.equal((await upload(png,'empty.png')).status,400);
+    mode='invalid';assert.equal((await upload(png,'invalid.png')).status,502);
+    mode='unsupported';const unsupported=await upload(png,'unsupported.png');assert.equal(unsupported.status,502);assert.match((await unsupported.json()).error.message,/支持图片输入/);
+    const summary=await store.summary();assert.equal(summary.requests,6);assert.equal(summary.credits,.25);assert.equal(summary.records[0].operation,'ocr');assert.equal(summary.records[0].usage,null);
+    const ledger=settingsFs.readFileSync(settingsPath.join(suiteSettingsDir,'ocr-usage.jsonl'),'utf8');
+    assert(!ledger.includes(expected));assert(!ledger.includes('base64'));assert(!ledger.includes('synthetic-ocr-key'));
+  },service);
+});
+
+test('image metadata parser rejects malformed and excessively large pixel dimensions', () => {
+  const {imageDescriptor}=require('../lib/resume-image');
+  assert.equal(imageDescriptor(Buffer.from('plain text')),null);
+  assert.throws(()=>imageDescriptor(Buffer.from([255,216,255,217])));
+  const png=settingsFs.readFileSync(settingsPath.join(__dirname,'fixtures/pixel.png'));
+  const zero=Buffer.from(png);zero.writeUInt32BE(0,16);assert.throws(()=>imageDescriptor(zero));
+  const oversized=Buffer.from(png);oversized.writeUInt32BE(10000,16);oversized.writeUInt32BE(10000,20);assert.throws(()=>imageDescriptor(oversized));
+});
+
+test('JD screenshot merging preserves edits and removes only overlapping text', () => {
+  const {mergeJDText}=require('../dist/resume-materials');
+  const first='岗位名称：AI 产品经理\n人工修改：仅考虑企业服务\n任职要求：';
+  assert.equal(mergeJDText(first,'任职要求：\n熟悉 SQL 与 RAG。'),first+'\n\n熟悉 SQL 与 RAG。');
+  assert.equal(mergeJDText(first,'岗位名称：AI 产品经理'),first);
+  assert.equal(mergeJDText('需要具备企业知识库产品需求分析与上线交付经验','企业知识库产品需求\n分析与上线交付经验，并熟悉 SQL。'),'需要具备企业知识库产品需求分析与上线交付经验，并熟悉 SQL。');
+  assert.equal(mergeJDText('要求 SQL','SQL 经验优先'),'要求 SQL\n\nSQL 经验优先');
+  assert.equal(mergeJDText('要求 SQL','需要三年产品经验'),'要求 SQL\n\n需要三年产品经验');
+  assert.equal(mergeJDText(first,'  '),first);
+  assert.throws(()=>mergeJDText('a'.repeat(49999),'还有新内容'),/50,000/);
+  assert.equal(mergeJDText('😀产品经理\n任职要求：','任职要求：\n熟悉 Agent'),'😀产品经理\n任职要求：\n\n熟悉 Agent');
+});
+
+test('multi-image OCR uses one ordered request and rejects incomplete batches atomically', async () => {
+  const {createUsageStore}=require('../lib/resume-credits');
+  const store=createUsageStore({file:settingsPath.join(suiteSettingsDir,'batch-ocr.jsonl')});
+  const pages=[{text:'岗位名称：AI 产品经理\n岗位职责：负责企业知识库\n任职要求：'},{text:'任职要求：\n三年产品经验，熟悉 SQL 与 RAG。'}];
+  let mode='ok',calls=0;
+  const service=createResumeService({usageStore:store,fetchFn:async(_url,options)=>{
+    calls++;
+    const request=JSON.parse(options.body),content=request.messages[1].content;
+    assert.match(request.messages[0].content,/pages/);
+    assert.equal(content.length,4);
+    assert.match(content[0].text,/第 1\/2 张/);assert.match(content[2].text,/第 2\/2 张/);
+    assert.match(content[1].image_url.url,/^data:image\/png/);assert.match(content[3].image_url.url,/^data:image\/jpeg/);
+    const output={kind:'jd',pages:mode==='missing'?pages.slice(0,1):mode==='empty'?[pages[0],{text:''}]:mode==='invalid'?[pages[0],{text:42}]:pages};
+    return new Response(JSON.stringify({usage:{prompt_tokens:1000,completion_tokens:200,total_tokens:1200},choices:[{message:{content:JSON.stringify(output)}}]}));
+  }});
+  await run(async base=>{
+    await post(base,'settings',{apiKey:'synthetic-batch-key',creditsPer10kTokens:1});
+    const png=settingsFs.readFileSync(settingsPath.join(__dirname,'fixtures/pixel.png'));
+    const jpg=settingsFs.readFileSync(settingsPath.join(__dirname,'fixtures/pixel.jpg'));
+    const upload=async(files=[[png,'one.png'],[jpg,'two.jpg']])=>{
+      const form=new FormData();files.forEach(([bytes,name])=>form.append('resume',new Blob([bytes]),name));form.set('kind','jd');
+      return fetch(base+'/api/resume/import',{method:'POST',headers:{'X-Resume-Request':'1'},body:form});
+    };
+    const response=await upload();assert.equal(response.status,200);
+    const result=await response.json();
+    assert.equal(result.imageCount,2);assert.equal(result.kind,'jd');
+    assert.equal(result.text,'岗位名称：AI 产品经理\n岗位职责：负责企业知识库\n任职要求：\n\n三年产品经验，熟悉 SQL 与 RAG。');
+    assert.equal(result.consumption.credits,.12);assert.equal(calls,1);
+    for(const invalid of [Array(11).fill([png,'one.png']),[[png,'one.png'],[Buffer.from('bad'),'two.jpg']],[[png,'one.png'],[Buffer.from('fake'),'job.pdf']],[[Buffer.alloc(8*1024*1024+1),'large.png']],Array(4).fill([Buffer.alloc(7*1024*1024),'large.png'])]) {
+      const response=await upload(invalid);assert.equal(response.status,invalid.length===4?413:400);
+    }
+    assert.equal(calls,1);
+    for(const [value,status] of [['missing',502],['empty',400],['invalid',502]]) {
+      mode=value;const response=await upload();assert.equal(response.status,status);
+      const error=await response.json();assert.equal(error.text,undefined);assert.match(error.error.message,/原有内容已保留/);
+    }
+    assert.equal((await store.summary()).requests,4);
+    assert.equal((await store.summary()).credits,.48);
+  },service);
 });

@@ -9,7 +9,7 @@ const ResumeChat = (() => {
   };
   const pages = { jd:1, diagnosis:2, match:3, questions:4, rewrite:5, resume:6, interview:7 };
   const materials = { resume:'简历', jd:'岗位描述' };
-  const chat = { history:[], draft:'', choiceDraft:'', pending:'', guide:'', files:{}, pickerKind:null, pendingFile:null, guidesOpen:false, editingMaterial:null, previewOpen:false, previewEditor:null, rewriting:null, startOnImport:false, roleFromJD:false, sampleReady:false, retry:null, waitingForService:false, run:null };
+  const chat = { history:[], draft:'', choiceDraft:'', pending:'', guide:'', files:{}, images:{}, pendingImage:null, pendingImageText:null, imageRetry:null, importStartedAt:0, pickerKind:null, pendingFile:null, guidesOpen:false, editingMaterial:null, previewOpen:false, previewEditor:null, rewriting:null, startOnImport:false, roleFromJD:false, sampleReady:false, retry:null, waitingForService:false, run:null };
   const serviceBusyMessage = '另一个简历任务正在运行。任务结束后即可重试。';
   const actionLabels = {diagnose:'简历诊断',jobs:'看看匹配岗位',tailored:'按目标岗位定制简历',style:'调整简历版式'};
   const diagnosisAnalysisLabels = {evidence:'简历证据',direction:'岗位方向对比',deductions:'扣分与证据缺口',priority:'修改优先级'};
@@ -103,19 +103,20 @@ const ResumeChat = (() => {
       <button class="icon-button" type="button" id="closeResumePreview" aria-label="关闭简历预览">×</button>
     </div>
     ${generated && !draft ? `<div class="resume-preview-toolbar">
-      <span>当前简历稿</span>
-      <label for="previewLayout">版式</label><select id="previewLayout" ${disabled}>${Object.entries(layouts).map(([value,label]) => `<option value="${value}" ${(state.layout || 'classic') === value ? 'selected' : ''}>${label}</option>`).join('')}</select>
-      <div class="resume-preview-export"><button class="button small" type="button" data-export="docx" ${disabled}>导出 Word</button><button class="button primary small" type="button" data-export="pdf" ${disabled}>${icon('download')}导出 PDF</button></div>
+      ${ResumeEditor.toolbar(disabled)}
+      <div class="resume-preview-export">${ResumeExports.button(disabled)}</div>
     </div>` : ''}
     <div class="resume-preview-body" tabindex="0" aria-label="简历正文">${draft ? streamingResume(draft) : generated ? resumePaper(previewBlock) : `<article class="resume-paper">${previewBlock('original',`<p class="resume-source-text">${esc(state.input.resume)}</p>`)}</article>`}</div>`;
   }
 
   function streamingResume(draft) {
-    return `<article class="resume-paper">
-      <h2 data-stream-field="name" ${draft.name ? '' : 'hidden'}>${esc(draft.name)}</h2>
-      <div class="resume-contact" data-stream-field="contact" ${draft.contact ? '' : 'hidden'}>${esc(draft.contact)}</div>
-      ${resumeSections.map(([key,title]) => `<section class="resume-section" ${draft[key] ? '' : 'hidden'}>
-        <h3>${title}</h3><p data-stream-field="${key}">${esc(draft[key])}</p></section>`).join('')}
+    const template = ResumeFormat.presentationFor(state.layout,state.appearance);
+    const sections = ResumeFormat.orderedSections(state.appearance).map(([key,title])=>({key,html:`<section class="resume-section" ${draft[key] ? '' : 'hidden'}>
+      <h3>${title}</h3><p data-stream-field="${key}">${resumeMarkup(draft[key],key !== 'intent')}</p></section>`}));
+    const body = template.side ? `<div class="resume-columns"><div class="resume-main-column">${sections.filter(section=>!ResumeFormat.sideFields.includes(section.key)).map(section=>section.html).join('')}</div><div class="resume-side-column">${sections.filter(section=>ResumeFormat.sideFields.includes(section.key)).map(section=>section.html).join('')}</div></div>` : sections.map(section=>section.html).join('');
+    return `<article class="resume-paper resume-template resume-${esc(state.layout || 'classic')}" data-heading="${template.heading}" data-header="${template.header}" data-side="${template.side || ''}" style="${ResumeEditor.paperStyle()}">
+      <div class="resume-profile"><h2 data-stream-field="name" ${draft.name ? '' : 'hidden'}>${esc(draft.name)}</h2>
+      <div class="resume-contact" data-stream-field="contact" ${draft.contact ? '' : 'hidden'}>${resumeMarkup(draft.contact)}</div></div>${body}
     </article>`;
   }
 
@@ -142,12 +143,12 @@ const ResumeChat = (() => {
 
   function startAfterMaterial(key, changed) {
     if (changed && key === 'jd' && chat.guide === 'tailored') chat.startOnImport = true;
-    return chat.startOnImport && !missingMaterial() && !chat.waitingForService;
+    return chat.startOnImport && !missingMaterial() && !chat.waitingForService && !chat.choiceDraft.trim() && (!chat.draft.trim() || chat.draft === guides[chat.guide]?.request);
   }
 
   function guidance() {
     const missing = missingMaterial();
-    if (missing === 'resume') return '先上传 PDF 或 Word 简历，也可以直接粘贴正文。';
+    if (missing === 'resume') return '可以粘贴简历正文或截图，也可以上传文档。';
     if (missing === 'jd') return '请上传或粘贴完整的岗位描述（JD）。';
     if (chat.guide === 'tailored' && !state.input.role) return '请告诉我目标岗位名称，我会结合已提供的 JD 和简历分析。';
     return '材料已就绪。你可以补充要求，准备好后发送。';
@@ -182,7 +183,7 @@ const ResumeChat = (() => {
   }
 
   function nextSteps() {
-    if (chat.pendingFile) return choicePanel(`「${esc(chat.pendingFile.name)}」用作什么？`,[
+    if (chat.pendingFile) return choicePanel(`「${chat.pendingImage?.files.length>1 ? `${chat.pendingImage.files.length} 张截图` : esc(chat.pendingFile.name)}」用作什么？`,[
       ['use-jd','作为岗位描述'], ['use-resume','作为简历'], ['cancel-file','取消上传']
     ],null);
     if (!chat.guide) return state.input.resume && !hasResume() ? choicePanel('想怎么使用这份材料？',[
@@ -307,7 +308,7 @@ const ResumeChat = (() => {
   function progressView() {
     const cancel = '<button type="button" class="text-button" id="cancelAnalysis">取消</button>';
     if (state.importBusy) {
-      return `<div class="chat-progress"><span role="status">正在读取文档…</span>${cancel}</div>`;
+      return `<div class="chat-progress"><span role="status">${chat.pendingImage ? '正在识别图片…' : '正在读取文档…'}</span>${chat.pendingImage ? '<span id="imageElapsed">执行时长 0.0 秒</span>' : ''}${cancel}</div>`;
     }
     const analyzing = state.busyType === 'analyze';
     const run = chat.run;
@@ -402,7 +403,7 @@ const ResumeChat = (() => {
       }
       const field = document.querySelector(`[data-stream-field="${event.key}"]`);
       if (!field) return;
-      field.textContent = run.resume[event.key];
+      field.innerHTML = resumeMarkup(run.resume[event.key],!['name','contact','intent'].includes(event.key));
       field.hidden = false;
       if (field.parentElement.matches('.resume-section')) field.parentElement.hidden = false;
     }
@@ -412,9 +413,9 @@ const ResumeChat = (() => {
     const started = chat.history.length > 0 || chat.pending;
     const busy = state.busy || state.importBusy;
     const attachments = Object.entries(chat.files).map(([key, name]) => `<span class="chat-file">
-      <button type="button" class="chat-file-label" data-edit-material="${key}" title="查看或修改${materials[key]}文本" ${busy ? 'disabled' : ''}>${icon('file')}<span>${materials[key]} · ${esc(name)}</span></button>
+      <button type="button" class="chat-file-label" data-edit-material="${key}" title="查看或修改${materials[key]}文本" ${busy ? 'disabled' : ''}>${chat.images[key] ? `<span class="chat-image-thumbs">${imageURLs(chat.images[key]).map((url,index)=>`<img class="chat-image-thumb" src="${url}" alt="${materials[key]}截图 ${index+1}">`).join('')}</span>` : icon('file')}<span>${materials[key]} · ${esc(name)}</span></button>
       <button type="button" class="chat-file-remove" aria-label="移除${materials[key]}附件" data-remove-file="${key}" ${busy ? 'disabled' : ''}>×</button>
-    </span>`).join('');
+    </span>`).join('') + (chat.pendingImage ? `<span class="chat-file"><span class="chat-image-thumbs">${chat.pendingImage.urls.map((url,index)=>`<img class="chat-image-thumb" src="${url}" alt="待识别图片 ${index+1}">`).join('')}</span><span>${chat.pendingImage.files.length>1 ? `${chat.pendingImage.files.length} 张截图` : esc(chat.pendingImage.file.name)}</span><button type="button" class="chat-file-remove" id="removePendingImage" aria-label="移除图片" ${busy ? 'disabled' : ''}>×</button></span>` : '');
     return `<section class="chat-shell ${started ? 'chat-started' : ''}" aria-label="简历会话">
       ${started ? `<div class="chat-thread" role="log" aria-label="会话记录">
         ${chat.history.map(messageView).join('')}
@@ -433,14 +434,15 @@ const ResumeChat = (() => {
         ${state.result ? '<button type="button" class="button small" data-go="7">面试准备</button>' : ''}
       </div>` : ''}
       ${state.error ? `<div class="error-box" role="alert"><span id="chatErrorText">${esc(state.error)}</span>
+        ${chat.imageRetry ? '<button type="button" class="button small" id="retryImage">重新识别图片</button>' : ''}
         ${chat.retry ? ` <button type="button" class="button small" id="retryChatTask" ${chat.waitingForService ? 'disabled' : ''}>${chat.retry.guide === 'optimize' ? '重试优化' : chat.retry.guide === 'diagnose' ? '重试诊断' : '重试'}</button>` : ''}</div>` : ''}
       <div class="chat-input-area"><form class="chat-composer" id="chatForm">
         <label for="chatMessage" class="sr-only">你的需求</label>
-        <textarea id="chatMessage" rows="3" maxlength="50000" placeholder="描述你的需求，或粘贴简历和岗位描述…" ${busy ? 'disabled' : ''}>${esc(chat.draft)}</textarea>
+        <textarea id="chatMessage" rows="3" maxlength="50000" placeholder="描述你的需求，或粘贴简历、JD 和截图…" ${busy ? 'disabled' : ''}>${esc(chat.draft)}</textarea>
         ${attachments ? `<div class="chat-files" aria-label="已上传文件">${attachments}</div>` : ''}
         <div class="chat-tools">
           <div class="chat-upload-tools">
-            <input type="file" id="chatFile" accept=".pdf,.docx" hidden>
+            <input type="file" id="chatFile" multiple accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" hidden>
             <button type="button" class="chat-upload-button" id="chatUpload" aria-label="上传文件" title="上传文件" ${busy ? 'disabled' : ''}>${icon('attach')}</button>
             ${started ? `<button type="button" class="text-button chat-chip" id="chatToggleGuides" aria-expanded="${chat.guidesOpen}" ${busy ? 'disabled' : ''}>快捷指引</button>` : ''}
           </div>
@@ -520,48 +522,142 @@ const ResumeChat = (() => {
     return state.input.resume || hasResume() ? null : 'resume';
   }
 
-  async function attach(file, kind = defaultFileKind()) {
-    if (!file || state.busy || state.importBusy) return;
-    if (!/\.(pdf|docx)$/i.test(file.name) || !file.size || file.size > 8 * 1024 * 1024) {
-      state.error = '请上传不超过 8 MB 的 PDF 或 Word (.docx) 文件。';
+  function isImage(file) {
+    return /^image\//i.test(file?.type || '') ? /^image\/(png|jpeg|webp)$/i.test(file.type) : /\.(png|jpe?g|webp)$/i.test(file?.name || '');
+  }
+
+  function imageURLs(value) { return Array.isArray(value) ? value : value ? [value] : []; }
+
+  function clearPendingImage() {
+    imageURLs(chat.pendingImage?.urls).forEach(url=>URL.revokeObjectURL(url));
+    chat.pendingImage = null;
+    chat.pendingImageText = null;
+    chat.imageRetry = null;
+    chat.pendingFile = null;
+  }
+
+  async function attach(input, kind) {
+    const supplied = Array.isArray(input) ? input : input ? [input] : [];
+    if (!supplied.length || state.busy || state.importBusy) return;
+    const image = supplied.every(isImage);
+    if (supplied.length > 10 || supplied.some(file=>!file.size || file.size > 8 * 1024 * 1024 || (!isImage(file) && !/\.(pdf|docx)$/i.test(file.name)))) {
+      state.error = '图片每批最多 10 张、每张不超过 8 MB；PDF / Word 请单独上传。';
       finishTurn();
       return;
     }
+    if (supplied.length > 1 && !image) {
+      state.error = '多文件识别仅支持图片，请将 PDF / Word 单独上传。';
+      finishTurn();
+      return;
+    }
+    if (supplied.reduce((sum,file)=>sum+file.size,0) > 24 * 1024 * 1024) {
+      state.error = '每批图片合计不能超过 24 MB。';
+      finishTurn();
+      return;
+    }
+    const sameBatch = image && chat.pendingImage?.files.length === supplied.length && supplied.every((file,index)=>file===chat.pendingImage.files[index]);
+    const cached = sameBatch ? chat.pendingImageText : null;
+    const files = supplied.map((file,index)=>{
+      if (!image || /\.(png|jpe?g|webp)$/i.test(file.name)) return file;
+      const extension = {'image/png':'png','image/jpeg':'jpg','image/webp':'webp'}[file.type] || 'png';
+      return new File([file],`粘贴图片-${index+1}.${extension}`,{type:file.type});
+    });
+    const file = files[0];
+    if (!image) clearPendingImage();
+    const awaitingJD = image && ((chat.guide === 'tailored' && (state.input.resume || hasResume() || state.input.jd)) || (state.input.jd && chat.images.jd));
+    let target = kind || (awaitingJD ? 'jd' : !image ? defaultFileKind() : null);
     state.error = '';
-    if (!kind) {
+    if (!image && !target) {
       chat.pendingFile = file;
       chat.editingMaterial = null;
       chat.guidesOpen = false;
       finishTurn('chatChoiceHeading');
       return;
     }
-    chat.pendingFile = null;
+    if (image && !sameBatch) {
+      clearPendingImage();
+      chat.pendingImage = {file,files,urls:files.map(file=>URL.createObjectURL(file))};
+    }
+    chat.imageRetry = null;
     state.importBusy = true;
+    chat.importStartedAt = performance.now();
     const controller = state.controller = new AbortController();
     render();
+    const timer = image ? setInterval(()=>{
+      const elapsed = $('imageElapsed');
+      if (elapsed) elapsed.textContent = `执行时长 ${((performance.now()-chat.importStartedAt)/1000).toFixed(1)} 秒`;
+    },200) : null;
     let startTask = false;
     try {
-      const form = new FormData();
-      form.append('resume',file);
-      const {text} = await api('/api/resume/import',form,{form:true,signal:controller.signal});
+      let result = cached;
+      if (!result) {
+        const form = new FormData();
+        files.forEach(file=>form.append('resume',file));
+        if (target) form.append('kind',target);
+        result = await api('/api/resume/import',form,{form:true,signal:controller.signal});
+      }
       if (controller.signal.aborted) return;
-      const changed = storeMaterial(kind,text);
-      chat.files[kind] = file.name;
-      if (kind === 'resume') revealPreview();
+      if (image) {chat.pendingFile = file;chat.pendingImageText = result;}
+      if (image && !target) target = ['resume','jd'].includes(result.kind) ? result.kind : chat.guide ? defaultFileKind() : null;
+      if (!target) {
+        chat.pendingFile = file;
+        chat.pendingImageText = result;
+        chat.editingMaterial = null;
+        chat.guidesOpen = false;
+        return;
+      }
+      const text = image && target === 'jd' ? ResumeMaterials.mergeJDText(state.input.jd,result.text) : result.text;
+      const changed = storeMaterial(target,text);
+      const previousImages = imageURLs(chat.images[target]);
+      if (image && chat.pendingImage) {
+        chat.images[target] = target === 'jd' ? [...previousImages,...chat.pendingImage.urls] : chat.pendingImage.urls;
+        if (target !== 'jd') previousImages.forEach(url=>URL.revokeObjectURL(url));
+        chat.pendingImage = null;
+      } else {
+        previousImages.forEach(url=>URL.revokeObjectURL(url));
+        delete chat.images[target];
+      }
+      const count = imageURLs(chat.images[target]).length;
+      chat.files[target] = count > 1 ? `${count} 张截图` : file.name;
+      chat.pendingFile = null;
+      chat.pendingImageText = null;
+      if (target === 'resume') revealPreview();
       chat.sampleReady = false;
       chat.retry = null;
       chat.editingMaterial = null;
-      startTask = startAfterMaterial(kind,changed);
-      addMessage('assistant',`${materials[kind]}已识别。${chat.guide && !startTask && !materialsReady() ? guidance() : ''}`);
+      const ready = startAfterMaterial(target,changed);
+      startTask = ready;
+      addMessage('assistant',`${materials[target]}已识别。${chat.guide && !startTask && !materialsReady() ? guidance() : ''}`);
+      if (!chat.guide && target === 'jd') chat.guidesOpen = true;
       if (!startTask && chat.guide && materialsReady() && !chat.draft.trim()) chat.draft = guides[chat.guide].request;
     } catch (error) {
-      state.error = error.name === 'AbortError' ? '已取消读取文档。' : error.message;
+      state.error = error.name === 'AbortError' ? (image ? '已取消图片识别。' : '已取消读取文档。') : error.message;
+      if (image) chat.imageRetry = {file,files,kind};
     } finally {
+      if (timer) clearInterval(timer);
       state.importBusy = false;
       state.controller = null;
       if (!startTask) finishTurn('chatChoiceHeading');
     }
     if (startTask) await send(null);
+  }
+
+  function bindClipboard(control) {
+    if (!control) return;
+    control.onpaste = event => {
+      const clipboard = event.clipboardData;
+      const items = Array.from(clipboard?.items || []).filter(item=>item.kind==='file').map(item=>item.getAsFile()).filter(Boolean);
+      const files = (items.length ? items : Array.from(clipboard?.files || [])).filter(file=>/^image\//i.test(file.type || '') || isImage(file));
+      if (!files.length) return;
+      event.preventDefault();
+      if (state.busy || state.importBusy) return;
+      const text = clipboard.getData('text/plain');
+      if (text) {
+        control.setRangeText(text,control.selectionStart,control.selectionEnd,'end');
+        control.dispatchEvent(new Event('input',{bubbles:true}));
+      }
+      attach(files);
+    };
   }
 
   async function send(draftField = 'draft', rewrite = null, preset = null) {
@@ -637,6 +733,7 @@ const ResumeChat = (() => {
       for (const [key,value] of Object.entries(otherMaterials)) {
         if (!storeMaterial(key,value)) continue;
         delete chat.files[key];
+        if (chat.images[key]) {imageURLs(chat.images[key]).forEach(url=>URL.revokeObjectURL(url));delete chat.images[key];}
         if (key === 'resume') revealPreview();
       }
       if (role !== undefined) {
@@ -718,11 +815,6 @@ const ResumeChat = (() => {
       chat.previewOpen = false;
       chat.previewEditor = null;
       finishTurn('chatMyResume');
-    };
-    if ($('previewLayout')) $('previewLayout').onchange = event => {
-      state.layout = event.target.value;
-      persistResumeDraft();
-      finishTurn('previewLayout');
     };
     const preview = $('resumePreview');
     preview.querySelectorAll('[data-suggest-section]').forEach(button => {
@@ -814,9 +906,9 @@ const ResumeChat = (() => {
         if (Object.hasOwn(guides,action)) selectGuide(action,true);
         else if (action.startsWith('upload-')) openFilePicker(action === 'upload-jd' ? 'jd' : 'resume');
         else if (action === 'paste-jd') editMaterial('jd');
-        else if (action === 'use-jd' || action === 'use-resume') attach(chat.pendingFile,action.slice(4));
+        else if (action === 'use-jd' || action === 'use-resume') attach(chat.pendingImage?.files || chat.pendingFile,action.slice(4));
         else if (action === 'cancel-file') {
-          chat.pendingFile = null;
+          clearPendingImage();
           finishTurn('chatUpload');
         } else custom?.focus();
       };
@@ -857,6 +949,8 @@ const ResumeChat = (() => {
     $('startSampleAnalysis')?.addEventListener('click',() => send(null));
     $('retryChatTask')?.addEventListener('click',() => send(null,null,chat.retry));
     const composer = $('chatMessage');
+    bindClipboard(composer);
+    bindClipboard($('chatChoiceText'));
     composer.oninput = () => {
       chat.draft = composer.value;
       $('chatSend').disabled = chat.waitingForService || !chat.draft.trim();
@@ -872,6 +966,8 @@ const ResumeChat = (() => {
     if (state.busy || state.importBusy) return;
     bindChoices();
     bindFollowUps();
+    $('retryImage')?.addEventListener('click',()=>attach(chat.imageRetry.files,chat.imageRetry.kind));
+    $('removePendingImage')?.addEventListener('click',()=>{clearPendingImage();state.error='';finishTurn();});
     document.querySelectorAll('[data-guide]').forEach(button => {
       button.onclick = () => {
         const id = button.dataset.guide;
@@ -906,7 +1002,7 @@ const ResumeChat = (() => {
     $('chatFile').onchange = event => {
       const kind = chat.pickerKind;
       chat.pickerKind = null;
-      attach(event.target.files[0], kind ?? undefined);
+      attach(Array.from(event.target.files), kind ?? undefined);
     };
     const form = $('chatForm');
     form.ondragover = event => {
@@ -918,15 +1014,16 @@ const ResumeChat = (() => {
       if (!form.contains(event.relatedTarget)) form.classList.remove('chat-drop-target');
     };
     form.ondrop = event => {
-      const [file] = event.dataTransfer.files;
-      if (!file) return;
+      const files = Array.from(event.dataTransfer.files);
+      if (!files.length) return;
       event.preventDefault();
       form.classList.remove('chat-drop-target');
-      attach(file);
+      attach(files);
     };
     document.querySelectorAll('[data-remove-file]').forEach(button => button.onclick = () => {
       const key = button.dataset.removeFile;
       delete chat.files[key];
+      if (chat.images[key]) {imageURLs(chat.images[key]).forEach(url=>URL.revokeObjectURL(url));delete chat.images[key];}
       storeMaterial(key,'');
       if (key === 'resume') chat.previewEditor = null;
       if (chat.editingMaterial === key) chat.editingMaterial = null;
@@ -941,6 +1038,13 @@ const ResumeChat = (() => {
       $('chatForm')?.scrollIntoView({block:'nearest'});
       $('chatMessage')?.focus({preventScroll:true});
     };
+    document.querySelectorAll('.chat-rail button').forEach(button=>{
+      button.onpointerenter=()=>button.classList.remove('tooltip-dismissed');
+      button.onpointerleave=()=>{if(!button.matches(':focus-visible'))button.classList.remove('tooltip-dismissed');};
+      button.onfocus=()=>button.classList.remove('tooltip-dismissed');
+      button.onblur=()=>{if(!button.matches(':hover'))button.classList.remove('tooltip-dismissed');};
+      button.onkeydown=event=>{if(event.key==='Escape')button.classList.add('tooltip-dismissed');};
+    });
     $('chatHome').onclick = focusComposer;
     $('railConversation').onclick = focusComposer;
     $('railGuides').onclick = () => {
@@ -973,7 +1077,9 @@ const ResumeChat = (() => {
     revealPreview();
     state.error = '';
     chat.files = {};
-    chat.pendingFile = null;
+    Object.values(chat.images).flatMap(imageURLs).forEach(url=>URL.revokeObjectURL(url));
+    chat.images = {};
+    clearPendingImage();
     chat.guide = 'tailored';
     chat.startOnImport = false;
     chat.roleFromJD = false;

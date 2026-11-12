@@ -11,9 +11,11 @@ npm ci
 npm start
 ```
 
-打开 [本地简历专家](http://localhost:4174/)，在「设置」中填写支持 Chat Completions 和 JSON 输出的模型地址、模型名与 API Key。也可以将 `.env.example` 复制为 `.env.local` 并填写配置。用「测试连接」验证模型，再上传 PDF 或 Word (.docx) 简历开始。
+打开 [本地简历专家](http://localhost:4174/)，在「设置」中填写支持 Chat Completions 和 JSON 输出的模型地址、模型名与 API Key。也可以将 `.env.example` 复制为 `.env.local` 并填写配置。用「测试连接」验证模型，再粘贴简历正文、截图，或上传 PDF / Word (.docx) 开始。PNG、JPEG、静态 WebP 图片支持文字识别，需当前模型支持图片输入，按实际模型用量计入积分。
 
-最新简历稿和版式会自动保存在当前浏览器。同一浏览器再次打开同一地址时，可以直接继续优化。可从「会话说明」清除本地保存。PDF 导出使用本机中文字体，必要时可通过环境变量 `RESUME_PDF_FONT` 指定字体文件。
+最新简历稿、模板及字体、字号、行高、边距、主题色和模块顺序会自动保存在当前浏览器。同一浏览器再次打开同一地址时，可以直接继续优化。PDF 导出使用本机中文字体，必要时可通过环境变量 `RESUME_PDF_FONT` 指定黑体字体文件，宋体可通过 `RESUME_PDF_SERIF_FONT` 指定（TTC 字体集可用 `RESUME_PDF_SERIF_FACE` 指定字面）。
+
+「设置 → 积分设置」默认 1 积分对应 10,000 Token，支持小数比例并显示消耗记录。仅统计模型返回的实际用量，记录保存在本机 `.local/resume-expert/usage.jsonl`，可用 `RESUME_USAGE_FILE` 指定位置。此阶段提供消耗计量，后续可关联用户账户及余额。
 
 ## 开发
 
@@ -22,3 +24,7 @@ npm test
 ```
 
 页面文件直接维护在 `dist/`。模型提示词位于 `prompts/resume/`。完整功能和验收规则见 [产品需求与构建提示词](docs/resume-expert-prd.md)，变更记录见 [简历专家实现记录](docs/resume-expert.md)。
+
+JD 连续截图支持批量粘贴、上传或拖拽（每批最多 10 张、每张 8 MB、合计 24 MB），按顺序合并识别。后续截图追加到当前 JD，保留已有内容与手动修改；重叠文字去重，失败整批保留供重试。
+
+简历预览和最终简历通过统一「导出」菜单选择 Word、PDF 或图片（PNG）。图片按当前 PDF 版式在浏览器本地逐页渲染并拼为完整长图，保留字体、主题色、模块顺序及蓝黄标记；首次使用按需加载本地 PDF.js 组件。

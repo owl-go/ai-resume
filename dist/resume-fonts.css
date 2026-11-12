@@ -1,0 +1,21 @@
+/* Remix Icon 4.6.0, Apache-2.0. Subset: see fonts/README.md. */
+@font-face { font-family: "Resume Icons"; src: url("/fonts/resume-icons.woff2") format("woff2"); font-style: normal; font-weight: 400; font-display: block; }
+.format-icon { font-family: "Resume Icons" !important; font-style: normal; font-weight: 400; font-size: 14px; line-height: 1; display: inline-flex; width: 14px; height: 14px; align-items: center; justify-content: center; flex: none; -webkit-font-smoothing: antialiased; }
+.format-icon-menu-line::before { content: "\ef3e"; }
+.format-icon-layout-2-line::before { content: "\ee7f"; }
+.format-icon-font-family::before { content: "\f390"; }
+.format-icon-font-size::before { content: "\ed8d"; }
+.format-icon-line-height::before { content: "\eead"; }
+.format-icon-space::before { content: "\f167"; }
+.format-icon-palette-line::before { content: "\efc5"; }
+.format-icon-restart-line::before { content: "\f080"; }
+.format-icon-arrow-down-s-line::before { content: "\ea4e"; }
+.format-icon-download-2-line::before { content: "\ec54"; }
+.format-icon-file-word-line::before { content: "\ed1d"; }
+.format-icon-check-line::before { content: "\eb7b"; }
+
+@font-face { font-family: "Resume Fangsong"; src: url("/fonts/FandolFang-Regular.otf") format("opentype"); font-style: normal; font-weight: 400; font-display: swap; }
+@font-face { font-family: "Resume Kaiti"; src: url("/fonts/FandolKai-Regular.otf") format("opentype"); font-style: normal; font-weight: 400; font-display: swap; }
+@font-face { font-family: "Resume Roboto"; src: url("/fonts/Roboto-Regular.ttf") format("truetype"); font-style: normal; font-weight: 400; font-display: swap; }
+@font-face { font-family: "Resume Open Sans"; src: url("/fonts/OpenSans-Regular.ttf") format("truetype"); font-style: normal; font-weight: 400; font-display: swap; }
+@font-face { font-family: "Resume Lato"; src: url("/fonts/Lato-Regular.ttf") format("truetype"); font-style: normal; font-weight: 400; font-display: swap; }

@@ -2,11 +2,12 @@
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const paths={file:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 13h8 M8 17h6',help:'M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3 M12 17h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',briefcase:'M3 7h18v13H3z M8 7V4h8v3 M3 12c5 3 13 3 18 0 M10 13h4',grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',shield:'M12 3 3 6v6c0 5 9 9 9 9s9-4 9-9V6z M8 12l3 3 5-6',target:'M21 12a9 9 0 1 1-9-9 M18 12a6 6 0 1 1-6-6 M12 12l9-9 M16 3h5v5',chart:'M4 20h17 M7 16v-5 M12 16V4 M17 16V8',match:'M8 4H4v4 M16 4h4v4 M4 16v4h4 M20 16v4h-4 M8 12l3 3 5-6',chat:'M21 15a3 3 0 0 1-3 3H8l-5 3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3z M7 8h10 M7 12h7',edit:'m16 3 5 5-12 12-6 1 1-6z M13 6l5 5',download:'M12 3v12 M7 10l5 5 5-5 M4 16v5h16v-5',arrow:'M4 12h16 M14 6l6 6-6 6',back:'M20 12H4 M10 6l-6 6 6 6',spark:'m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z',upload:'M12 16V4 M7 9l5-5 5 5 M4 16v5h16v-5',check:'m5 12 4 4L19 6',bulb:'M9 18h6 M9 21h6 M8 14a7 7 0 1 1 8 0l-1 2H9z',lock:'M6 10h12v11H6z M8 10V7a4 4 0 0 1 8 0v3',info:'M12 11v6 M12 7h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',copy:'M9 9h12v12H9z M15 5V3H3v12h2',refresh:'M20 7V3l-4 4 M20 7a9 9 0 1 0 1 9'};
+paths.image='M4 3h16v18H4z M8 8h.01 M4 17l5-5 4 4 3-3 4 4';
 paths.settings='M5 7h14M5 17h14M9 4v6M15 14v6';
 paths.attach='m8 13 6-6a2.5 2.5 0 0 1 3.5 3.5l-8 8a4 4 0 0 1-5.7-5.7l8-8';
 const icon=(name,cls='')=>`<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.file}"/></svg>`;
 const steps=[['会话','chat'],['JD 解析','target'],['简历诊断','chart'],['匹配分析','match'],['经历追问','chat'],['简历优化','edit'],['最终简历','file'],['面试准备','briefcase']];
-const state={step:0,input:{role:'',industry:'',company:'',stage:'',focus:'',jd:'',resume:'',extra:'',projects:'',skills:'',results:'',boundaries:'',length:'不限制'},result:null,chatResume:null,layout:'',resultModel:'',status:null,answers:[],bullets:[],style:'original',error:'',busy:false,busyType:'',controller:null,importBusy:false,editing:false,manualResume:null,completed:new Set()};
+const state={step:0,input:{role:'',industry:'',company:'',stage:'',focus:'',jd:'',resume:'',extra:'',projects:'',skills:'',results:'',boundaries:'',length:'不限制'},result:null,chatResume:null,appearance:ResumeFormat.appearanceFor(),layout:'',resultModel:'',status:null,answers:[],bullets:[],style:'original',error:'',exporting:false,busy:false,busyType:'',controller:null,importBusy:false,editing:false,manualResume:null,completed:new Set()};
 let toastTimer;
 function toast(message){$('toast').textContent=message;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),4200);}
 function hydrateIcons(root=document){root.querySelectorAll('[data-icon]').forEach(el=>{el.innerHTML=icon(el.dataset.icon);});}
@@ -93,7 +94,7 @@ function diagnosisView() {
     </details>${footer()}`;
 }
 function matchView(){const r=state.result.matches;return `${heading('匹配分析','查看哪些岗位要求已有经历支撑，哪些需要补充。')}<section class="card table-card"><div class="table-title"><h2>JD 要求 × 简历证据</h2><div class="tags"><span class="badge strong">${r.filter(x=>x.strength==='强').length} 项证据充分</span><span class="badge">${r.filter(x=>x.supplement==='是').length} 项建议补充</span></div></div><div class="table-scroll"><table><thead><tr><th style="width:20%">JD 要求</th><th style="width:27%">简历证据</th><th style="width:12%">证据强度</th><th style="width:12%">是否补充</th><th>优化建议</th></tr></thead><tbody>${r.map(x=>`<tr><td>${esc(x.requirement)}</td><td>${esc(x.evidence)}</td><td><span class="badge ${x.strength === '强' ? 'strong' : ''}">${esc(x.strength)}</span></td><td>${esc(x.supplement)}</td><td>${esc(x.suggestion)}</td></tr>`).join('')}</tbody></table></div></section>${footer()}`;}
-function questionView(){const r=state.result.questions,count=state.answers.filter(x=>x?.trim()).length;return `${heading('经历追问','说明你做了什么、交付了什么。未核实的数据可以留空。',`<button class="heading-action" id="generateBullets">${state.bullets.length?'重新生成表达':'生成简历表达'}</button>`)}<div class="question-top"><span id="answerCount">已回答 ${count} / ${r.length}</span><div class="progress-track"><div id="answerBar" style="width:${count/r.length*100}%"></div></div><span>至少回答 1 个问题即可生成</span></div>${state.error?`<div class="error-box" role="alert">${esc(state.error)}</div>`:''}<div class="question-list">${r.map((q,i)=>`<section class="card question-card"><div class="question-head"><span>${String(i+1).padStart(2,'0')}</span><div><h3><label for="answer-${i}">${esc(q.title)}</label></h3><p>${esc(q.context)}</p></div></div><textarea id="answer-${i}" data-answer="${i}" placeholder="${esc(q.hint)}" maxlength="3000">${esc(state.answers[i]||'')}</textarea>${state.bullets.find(b=>b.index===i)?`<div class="bullet-result"><strong>可用于简历的表达</strong><br>${esc(state.bullets.find(b=>b.index===i).text)}</div>`:''}</section>`).join('')}</div>${state.bullets.length?`<div class="notice" style="margin-top:18px">${icon('check')}已生成 ${state.bullets.length} 条表达，并同步到最终简历。请核对事实和个人职责边界。</div>`:''}${footer('查看简历优化')}`;}
+function questionView(){const r=state.result.questions,count=state.answers.filter(x=>x?.trim()).length;return `${heading('经历追问','说明你做了什么、交付了什么。未核实的数据可以留空。',`<button class="heading-action" id="generateBullets">${state.bullets.length?'重新生成表达':'生成简历表达'}</button>`)}<div class="question-top"><span id="answerCount">已回答 ${count} / ${r.length}</span><div class="progress-track"><div id="answerBar" style="width:${count/r.length*100}%"></div></div><span>至少回答 1 个问题即可生成</span></div>${state.error?`<div class="error-box" role="alert">${esc(state.error)}</div>`:''}<div class="question-list">${r.map((q,i)=>`<section class="card question-card"><div class="question-head"><span>${String(i+1).padStart(2,'0')}</span><div><h3><label for="answer-${i}">${esc(q.title)}</label></h3><p>${esc(q.context)}</p></div></div><textarea id="answer-${i}" data-answer="${i}" placeholder="${esc(q.hint)}" maxlength="3000">${esc(state.answers[i]||'')}</textarea>${state.bullets.find(b=>b.index===i)?`<div class="bullet-result"><strong>可用于简历的表达</strong><br>${resumeMarkup(state.bullets.find(b=>b.index===i).text,true)}</div>`:''}</section>`).join('')}</div>${state.bullets.length?`<div class="notice" style="margin-top:18px">${icon('check')}已生成 ${state.bullets.length} 条表达，并同步到最终简历。请核对事实和个人职责边界。</div>`:''}${footer('查看简历优化')}`;}
 const styleNames={original:'原始优化版',concise:'更简洁',careful:'降低夸张',ai:'AI 产品证据',saas:'ToB SaaS 证据'};
 const evidenceTerms={
   ai:/\b(?:AI|LLM|RAG|Dify|Prompt|Agent)\b|大模型|知识库|问答原型|模型评估|提示词/gi,
@@ -123,9 +124,9 @@ function styleDescription() {
   if (state.manualResume) return '此处预览表达。已手动编辑的内容请在最终简历中核对。';
   return '规则预览，表达调整会同步到最终简历。';
 }
-function rewriteView(){return `${heading('简历优化','对照原文核对修改、原因和待确认事项。')}${strategyView()}<div class="table-title inline-section-title"><h2>修改前后对照表</h2></div><div class="style-toolbar"><div class="style-options" role="group" aria-label="模拟表达风格">${Object.entries(styleNames).map(([k,v])=>`<button data-style="${k}" class="${state.style===k?'active':''}" aria-pressed="${state.style===k}">${v}</button>`).join('')}</div><span>${styleDescription()}</span></div><section class="card table-card"><div class="table-scroll"><table><thead><tr><th style="width:22%">修改前</th><th style="width:33%">修改后</th><th style="width:23%">修改理由</th><th>风险提示</th></tr></thead><tbody>${orderedRewrites(state.result.rewrites).map(x=>`<tr><td class="rewrite-before">${esc(x.before)}</td><td class="rewrite-after">${esc(styled(x.after))}</td><td>${esc(x.reason)}</td><td>${esc(x.risk)}</td></tr>`).join('')}${state.bullets.map(b=>`<tr><td>${esc(state.answers[b.index])}</td><td class="rewrite-after">${esc(b.text)}</td><td>根据本人追问回答整理，保留实际行动与可核实结果。</td><td>请核实数据口径及本人职责边界。</td></tr>`).join('')}</tbody></table></div></section>${!state.bullets.length?`<div class="notice" style="margin-top:18px">${icon('chat')}还可以通过经历追问，补充简历里遗漏的具体证据。<button class="text-button" data-go="4">去回答追问 →</button></div>`:''}${footer('查看最终简历')}`;}
+function rewriteView(){return `${heading('简历优化','对照原文核对修改、原因和待确认事项。')}${strategyView()}<div class="table-title inline-section-title"><h2>修改前后对照表</h2></div><div class="style-toolbar"><div class="style-options" role="group" aria-label="模拟表达风格">${Object.entries(styleNames).map(([k,v])=>`<button data-style="${k}" class="${state.style===k?'active':''}" aria-pressed="${state.style===k}">${v}</button>`).join('')}</div><span>${styleDescription()}</span></div><section class="card table-card"><div class="table-scroll"><table><thead><tr><th style="width:22%">修改前</th><th style="width:33%">修改后</th><th style="width:23%">修改理由</th><th>风险提示</th></tr></thead><tbody>${orderedRewrites(state.result.rewrites).map(x=>`<tr><td class="rewrite-before">${esc(x.before)}</td><td class="rewrite-after">${resumeMarkup(styled(x.after),true)}</td><td>${esc(x.reason)}</td><td>${esc(x.risk)}</td></tr>`).join('')}${state.bullets.map(b=>`<tr><td>${esc(state.answers[b.index])}</td><td class="rewrite-after">${resumeMarkup(b.text,true)}</td><td>根据本人追问回答整理，保留实际行动与可核实结果。</td><td>请核实数据口径及本人职责边界。</td></tr>`).join('')}</tbody></table></div></section>${!state.bullets.length?`<div class="notice" style="margin-top:18px">${icon('chat')}还可以通过经历追问，补充简历里遗漏的具体证据。<button class="text-button" data-go="4">去回答追问 →</button></div>`:''}${footer('查看最终简历')}`;}
 const {sections:resumeSections, entryParts:resumeEntryParts, entryName:resumeEntryName, lineSpans:resumeLineSpans, supplementTitle} = ResumeFormat;
-const resumeMarks = {pending:'resume-evidence-pending', result:'resume-key-result'};
+const resumeMarks = {pending:'resume-evidence-pending', example:'resume-fill-example', result:'resume-key-result'};
 const draftStorageKey = 'resume-expert.draft.v1';
 const draftFields = ['name','contact',...resumeSections.map(([field]) => field)];
 let draftStorageIssue = '';
@@ -160,7 +161,7 @@ function persistResumeDraft() {
   const resume = Object.fromEntries(draftFields.map(field => [field,current[field] ?? '']));
   try {
     if (Object.values(resume).some(value => value.trim())) {
-      localStorage.setItem(draftStorageKey,JSON.stringify({version:1,resume,layout:state.layout || 'classic'}));
+      localStorage.setItem(draftStorageKey,JSON.stringify({version:1,resume,layout:state.layout || 'classic',appearance:state.appearance}));
     } else localStorage.removeItem(draftStorageKey);
     draftStorageIssue = '';
     return true;
@@ -180,6 +181,7 @@ function restoreResumeDraft() {
         || !draftFields.some(field => record.resume[field].trim())) throw new Error('draft');
     state.chatResume = Object.fromEntries(draftFields.map(field => [field,record.resume[field]]));
     state.layout = record.layout;
+    try { state.appearance = ResumeFormat.appearanceFor(record.appearance); } catch { state.appearance = ResumeFormat.appearanceFor(); }
     ResumeChat.restoreDraft();
     return true;
   } catch {
@@ -191,7 +193,7 @@ function resumePaper(block = (_key, content) => content) {
   const layout = state.layout ? ' resume-' + esc(state.layout) : '';
   if (state.editing) {
     const draft = finalResume(false);
-    const fields = [['contact','个人信息 / 联系方式'],...resumeSections];
+    const fields = [['contact','个人信息 / 联系方式'],...ResumeFormat.orderedSections(state.appearance)];
     return `<article class="resume-paper${layout} resume-edit">
       <label class="field-label" for="edit-name">姓名</label>
       <input class="input" id="edit-name" data-resume="name" maxlength="100" value="${esc(draft.name)}">
@@ -200,20 +202,24 @@ function resumePaper(block = (_key, content) => content) {
     </article>`;
   }
   const draft = finalResume();
+  const template = ResumeFormat.presentationFor(state.layout,state.appearance);
   const baseProjects = state.bullets.length ? finalResume(false).projects || '' : draft.projects;
   const profile = block('profile',`<h2>${esc(draft.name)}</h2><div class="resume-contact">${resumeMarkup(draft.contact)}</div>`);
-  const sections = resumeSections.filter(([key]) => draft[key]?.trim()).map(([key,label]) => {
+  const sections = ResumeFormat.orderedSections(state.appearance).filter(([key]) => draft[key]?.trim()).map(([key,label]) => {
     let content;
     if (key === 'experience' || key === 'projects') {
       const entries = key === 'projects' ? baseProjects : draft.experience;
       content = resumeEntryParts(entries,key).map(entry => resumeEntryMarkup(entry,key)).join('\n\n');
       if (key === 'projects' && state.bullets.length) content += resumeMarkup(draft.projects.slice(baseProjects.length),true);
     } else content = resumeMarkup(draft[key],key !== 'intent');
-    return block(key,`<section class="resume-section"><h3>${label}</h3><p>${content}</p></section>`,draft[key]);
+    return {key,html:block(key,`<section class="resume-section"><h3>${label}</h3><p>${content}</p></section>`,draft[key])};
   });
-  return `<article class="resume-paper${layout}">${profile}${sections.join('')}</article>`;
+  const body = template.side
+    ? `<div class="resume-columns"><div class="resume-main-column">${sections.filter(section => !ResumeFormat.sideFields.includes(section.key)).map(section => section.html).join('')}</div><div class="resume-side-column">${sections.filter(section => ResumeFormat.sideFields.includes(section.key)).map(section => section.html).join('')}</div></div>`
+    : sections.map(section => section.html).join('');
+  return `<article class="resume-paper resume-template${layout}" data-heading="${template.heading}" data-header="${template.header}" data-side="${template.side || ''}" style="${ResumeEditor.paperStyle()}"><div class="resume-profile">${profile}</div>${body}</article>`;
 }
-function resumeView(){return `${heading('最终简历','可编辑，支持导出 PDF 和 Word。',`<button class="heading-action" id="editResume">${icon('edit')}${state.editing?'保存修改':'编辑简历'}</button>`)}${state.error?`<div class="error-box" role="alert">${esc(state.error)}</div>`:''}${state.result&&state.bullets.length<state.result.questions.length?'<div class="notice">经历追问尚未全部补齐，当前含基于现有材料的保守优化，需要用户确认。</div>':''}<div class="resume-layout">${resumePaper()}<aside class="resume-sidebar"><div><section class="card right-card"><div class="right-title">${icon('download')}导出你的简历</div><div class="export-options">${state.input.role ? `<span class="badge strong">${esc(state.input.role)}</span>` : ''}<button class="button primary" data-export="pdf">${icon('file')}导出 PDF${icon('download')}</button><button class="button" data-export="docx">${icon('file')}导出 Word${icon('download')}</button><button class="button" id="copyResume">${icon('copy')}复制简历全文</button><p>PDF 适合正式投递<br>Word 适合继续编辑<br>导出内容与当前预览一致</p></div></section><div class="export-caption">${state.layout ? ({classic:'标准版式', compact:'紧凑版式', editorial:'居中标题'})[state.layout] : state.bullets.length?`已纳入 ${state.bullets.length} 条追问表达`:'可继续回答追问，补充具体经历'}</div></div><div class="tip-card"><div class="tip-head">${icon('shield')}投递前核对</div><p>核实联系方式、任职时间、学历、数据和个人贡献。标注为学习实践的内容，请保留真实边界。</p></div></aside></div>${state.result ? footer('准备面试') : '<div class="page-bottom"><button type="button" class="button" data-go="0">返回会话</button></div>'}`;}
+function resumeView(){return `${heading('最终简历','可编辑，支持导出 Word、PDF 和图片。',`<button class="heading-action" id="editResume">${icon('edit')}${state.editing?'保存修改':'编辑简历'}</button>`)}${state.error?`<div class="error-box" role="alert">${esc(state.error)}</div>`:''}${state.result&&state.bullets.length<state.result.questions.length?'<div class="notice">经历追问尚未全部补齐，当前含基于现有材料的保守优化，需要用户确认。</div>':''}<div class="resume-layout">${ResumeEditor.toolbar()}${resumePaper()}<aside class="resume-sidebar"><div><section class="card right-card"><div class="right-title">${icon('download')}导出你的简历</div><div class="export-options">${state.input.role ? `<span class="badge strong">${esc(state.input.role)}</span>` : ''}${ResumeExports.button()}<button class="button" id="copyResume">${icon('copy')}复制简历全文</button><p>导出内容与当前预览一致</p></div></section><div class="export-caption">${state.layout ? ResumeFormat.layouts[state.layout] : state.bullets.length?`已纳入 ${state.bullets.length} 条追问表达`:'可继续回答追问，补充具体经历'}</div></div><div class="tip-card"><div class="tip-head">${icon('shield')}投递前核对</div><p>核实联系方式、任职时间、学历、数据和个人贡献。标注为学习实践的内容，请保留真实边界。</p></div></aside></div>${state.result ? footer('准备面试') : '<div class="page-bottom"><button type="button" class="button" data-go="0">返回会话</button></div>'}`;}
 function interviewView(){const r=state.result.interview;return `${heading('面试准备')}<div class="interview-grid"><div><section class="card"><div class="table-title"><h2>10 个可能的面试追问</h2></div>${r.questions.map((q,i)=>`<div class="interview-question"><span>${String(i+1).padStart(2,'0')}</span><div><h3>${esc(q.question)}</h3><p>准备证据：${esc(q.evidence)}</p><p class="interview-advice">回答建议：${esc(q.advice)}</p></div></div>`).join('')}</section>${state.bullets.length?resultCard('你的补充经历，也可能被追问',list(state.bullets.map(b=>`关于“${b.text}”：你的具体贡献、结果依据及可展示材料是什么？`)),'intro'):''}${resultCard('自我介绍 · 参考稿',`<p style="white-space:pre-line">${esc(r.intro)}</p><button class="button small" id="copyIntro" style="margin-top:15px">${icon('copy')}复制自我介绍</button>`,'intro')}</div><aside>${resultCard('可能夸大的表达',list(r.exaggerations))}${resultCard('建议补充的数据',list(r.missingData),'intro')}</aside></div>${strengtheningView()}${footer()}`;}
 function loadingView() {
   const refining = state.busyType === 'refine';
@@ -305,11 +311,15 @@ function saveResumeEdits(){
   return persistResumeDraft();
 }
 async function exportResume(format) {
+  if (state.exporting || state.busy || state.importBusy || !['docx','pdf','png'].includes(format)) return;
+  ResumeExports.close();
   if (state.editing) { saveResumeEdits(); render(); }
-  document.querySelectorAll('[data-export]').forEach(button => button.disabled = true);
+  state.exporting = true;
+  ResumeExports.refreshBusy();
   try {
-    const resume = finalResume();
-    const blob = await api('/api/resume/export',{format,resume,layout:state.layout||undefined},{blob:true});
+    const resume = structuredClone(finalResume());
+    let blob = await api('/api/resume/export',{format:format==='png'?'pdf':format,resume,layout:state.layout||undefined,appearance:state.appearance},{blob:true});
+    if (format === 'png') blob = await ResumeExports.toPNG(blob);
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     const name = resume.name.replace(/[\\/:*?"<>|]/g,'') || '我的简历';
@@ -320,23 +330,28 @@ async function exportResume(format) {
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url),10000);
-    toast(format === 'pdf' ? 'PDF 简历已导出。' : 'Word 简历已导出。');
+    toast(format === 'png' ? '图片简历已导出。' : format === 'pdf' ? 'PDF 简历已导出。' : 'Word 简历已导出。');
   } catch (error) {
     state.error = error.message;
     render();
+    toast(error.message);
   } finally {
-    document.querySelectorAll('[data-export]').forEach(button => button.disabled = state.busy || state.importBusy);
+    state.exporting = false;
+    ResumeExports.refreshBusy();
   }
 }
 async function copyText(text){try{await navigator.clipboard.writeText(text);toast('已复制到剪贴板。');}catch{toast('浏览器未允许复制，请手动选择文本复制。');}}
 function bind(){
 document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>go(Number(el.dataset.go)));
 document.querySelectorAll('[data-export]').forEach(el => el.onclick = () => exportResume(el.dataset.export));
+ResumeExports.bind();
+document.querySelectorAll('[data-open-templates]').forEach(el => el.onclick = () => ResumeTemplates.open(el));
+ResumeEditor.bind();
 if (state.step === 0) { ResumeChat.bind(); return; }
 if(state.busy){$('cancelAnalysis').onclick=()=>state.controller?.abort();return;}
 if(state.step===4&&state.result){document.querySelectorAll('[data-answer]').forEach(el=>el.oninput=()=>{state.answers[Number(el.dataset.answer)]=el.value;if(state.bullets.length){state.bullets=[];state.completed.delete(4);document.querySelectorAll('.bullet-result').forEach(x=>x.remove());if(persistResumeDraft())toast('回答已修改，旧表达已失效。请重新生成。');renderNav();}const count=state.answers.filter(x=>x?.trim()).length;$('answerCount').textContent=`已回答 ${count} / ${state.result.questions.length}`;$('answerBar').style.width=`${count/state.result.questions.length*100}%`;});$('generateBullets').onclick=generateBullets;}
 if(state.step===5){document.querySelectorAll('[data-style]').forEach(el=>el.onclick=()=>{state.style=el.dataset.style;persistResumeDraft();render();document.querySelector(`[data-style="${state.style}"]`).focus();});}
-if(state.step===6&&hasResume()){$('editResume').onclick=()=>{if(state.editing){if(saveResumeEdits())toast('简历修改已保存。');}else {state.manualResume=finalResume(false);state.editing=true;}render();if(state.editing)$('edit-name').focus();};$('copyResume').onclick=()=>{if(state.editing){saveResumeEdits();render();}const r=finalResume();copyText(`${r.name}\n${r.contact}\n\n${resumeSections.filter(([k])=>r[k]?.trim()).map(([k,t])=>t+'\n'+r[k]).join('\n\n')}`);};}
+if(state.step===6&&hasResume()){$('editResume').onclick=()=>{if(state.editing){if(saveResumeEdits())toast('简历修改已保存。');}else {state.manualResume=finalResume(false);state.editing=true;}render();if(state.editing)$('edit-name').focus();};$('copyResume').onclick=()=>{if(state.editing){saveResumeEdits();render();}const r=finalResume();copyText(`${r.name}\n${r.contact}\n\n${ResumeFormat.orderedSections(state.appearance).filter(([k])=>r[k]?.trim()).map(([k,t])=>t+'\n'+r[k]).join('\n\n')}`);};}
 if(state.step===7&&state.result)$('copyIntro').onclick=()=>copyText(state.result.interview.intro);
 }
 const restoredDraft = restoreResumeDraft();
@@ -344,7 +359,7 @@ hydrateIcons();render();
 ResumeChat.bindRail();
 if (restoredDraft) toast('已恢复上次保存的简历。');
 document.querySelector('.brand').onclick = event => { event.preventDefault(); go(0); };
-$('helpBtn').onclick=()=>$('helpDialog').showModal();$('closeHelp').onclick=()=>$('helpDialog').close();$('helpDone').onclick=()=>$('helpDialog').close();
+$('helpBtn')?.addEventListener('click',()=>$('helpDialog').showModal());$('closeHelp').onclick=()=>$('helpDialog').close();$('helpDone').onclick=()=>$('helpDialog').close();
 $('sampleBtn').onclick = () => { $('helpDialog').close(); ResumeChat.useSample(); };
 function showSession() {
   let hasSavedDraft = false;
@@ -357,7 +372,7 @@ function showSession() {
   $('draftStorageStatus').textContent = draftStorageIssue || (hasSavedDraft ? '已保存一份简历稿。' : '暂无本地简历稿。');
   $('sessionDialog').showModal();
 }
-$('sessionBtn').onclick=showSession;
+$('sessionBtn')?.addEventListener('click',showSession);
 $('sessionFromHelp').onclick=()=>{ $('helpDialog').close(); showSession(); };
 $('closeSession').onclick=()=>$('sessionDialog').close();
 $('clearSavedDraft').onclick=()=>{
@@ -373,11 +388,50 @@ $('clearSavedDraft').onclick=()=>{
 };
 fetch('/api/resume/status').then(async r=>{if(!r.ok)throw new Error('status');state.status=await r.json();}).catch(()=>{state.status=null;});
 let loadedSettings=null,settingsController=null;
-function switchSettingsTab(which){const model=which==='model';$('modelTab').setAttribute('aria-selected',String(model));$('promptTab').setAttribute('aria-selected',String(!model));$('modelTab').tabIndex=model?0:-1;$('promptTab').tabIndex=model?-1:0;$('modelPanel').hidden=!model;$('promptPanel').hidden=model;}
-function settingValues(){return {baseURL:$('modelAddress').value.trim(),apiKey:$('modelKey').value.trim(),model:$('modelName').value.trim(),clearApiKey:$('clearKey').checked,reasoningEffort:$('modelReasoning').value,timeoutMs:Number($('modelTimeout').value),prompts:{analysis:$('analysisPrompt').value}};}
+const settingsTabs = ['model','prompt','credits'];
+const numberText = value => typeof value === 'number' && Number.isFinite(value) ? new Intl.NumberFormat('zh-CN',{maximumFractionDigits:8}).format(value) : '—';
+function switchSettingsTab(which) {
+  settingsTabs.forEach(name => {
+    const selected = name === which;
+    $(name+'Tab').setAttribute('aria-selected',String(selected));
+    $(name+'Tab').tabIndex = selected ? 0 : -1;
+    $(name+'Panel').hidden = !selected;
+  });
+  if (which === 'credits') loadCreditUsage();
+}
+function updateCreditsFormula() {
+  const rate = Number($('creditsRate').value);
+  $('creditsFormula').textContent = rate > 0 && Number.isFinite(rate) ? `1,000 Token = ${numberText(rate / 10)} 积分` : '请输入有效的积分比例。';
+}
+async function loadCreditUsage() {
+  $('refreshCreditUsage').disabled = true;
+  $('creditUsageError').hidden = true;
+  try {
+    const response = await fetch('/api/resume/usage');
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.error?.message || '暂时无法读取积分消耗。');
+    if (value.recordingError) {
+      $('creditUsageError').textContent = '部分用量未能保存，请检查本机积分记录。';
+      $('creditUsageError').hidden = false;
+    }
+    $('creditUsageSummary').innerHTML = `<span>累计 Token <em>${numberText(value.totalTokens)}</em></span><span>累计消耗 <em>${numberText(value.credits)} 积分</em></span><span>未返回用量 <em>${value.unreportedRequests} 次</em></span>`;
+    const operations = {chat:'会话',analyze:'定向分析',refine:'经历补充',test:'连接测试',ocr:'图片识别'};
+    $('creditUsageRecords').innerHTML = value.records.length ? value.records.map(record => {
+      const time = new Date(record.createdAt).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+      const outcome = {completed:'完成',failed:'失败',cancelled:'取消'}[record.outcome] || '未知';
+      return `<tr><td>${esc(time)}</td><td>${esc(operations[record.operation] || record.operation)}</td><td>${numberText(record.usage?.totalTokens)}</td><td>${numberText(record.credits)}</td><td>${outcome}${record.usage ? '' : ' · 未返回用量'}</td></tr>`;
+    }).join('') : '<tr><td colspan="5" class="credit-usage-empty">暂无消耗记录</td></tr>';
+  } catch (error) {
+    $('creditUsageError').textContent = error.message;
+    $('creditUsageError').hidden = false;
+  } finally { $('refreshCreditUsage').disabled = false; }
+}
+$('creditsRate').oninput = updateCreditsFormula;
+$('refreshCreditUsage').onclick = loadCreditUsage;
+function settingValues(){return {creditsPer10kTokens:Number($('creditsRate').value),baseURL:$('modelAddress').value.trim(),apiKey:$('modelKey').value.trim(),model:$('modelName').value.trim(),clearApiKey:$('clearKey').checked,reasoningEffort:$('modelReasoning').value,timeoutMs:Number($('modelTimeout').value),prompts:{analysis:$('analysisPrompt').value}};}
 function settingError(message){$('settingsError').textContent=message;$('settingsError').hidden=!message;}
 function settingsBusy(busy){$('saveSettings').disabled=busy;$('testModel').disabled=busy;}
-function applySettingsToUI(v){loadedSettings=v;renderPromptVariables(v.variables||[]);$('promptPreview').hidden=true;$('promptPreviewText').textContent='';$('modelAddress').value=v.baseURL;$('modelName').value=v.model;$('modelReasoning').value=v.reasoningEffort||'auto';$('modelTimeout').value=String(v.timeoutMs||240000);$('modelKey').value='';$('modelKey').placeholder=v.apiKeyConfigured?'已有密钥 · 留空保持不变':'输入你的 API Key';$('keyStatus').textContent=v.apiKeyConfigured?'密钥已配置':'尚未配置密钥';$('keyStatus').className=`badge ${v.apiKeyConfigured ? 'strong' : ''}`;$('clearKey').checked=false;$('analysisPrompt').value=v.prompts.analysis;$('settingsSource').textContent = '模型配置来源：' + v.source;
+function applySettingsToUI(v){loadedSettings=v;$('creditsRate').value=String(v.creditsPer10kTokens??1);updateCreditsFormula();renderPromptVariables(v.variables||[]);$('promptPreview').hidden=true;$('promptPreviewText').textContent='';$('modelAddress').value=v.baseURL;$('modelName').value=v.model;$('modelReasoning').value=v.reasoningEffort||'auto';$('modelTimeout').value=String(v.timeoutMs||240000);$('modelKey').value='';$('modelKey').placeholder=v.apiKeyConfigured?'已有密钥 · 留空保持不变':'输入你的 API Key';$('keyStatus').textContent=v.apiKeyConfigured?'密钥已配置':'尚未配置密钥';$('keyStatus').className=`badge ${v.apiKeyConfigured ? 'strong' : ''}`;$('clearKey').checked=false;$('analysisPrompt').value=v.prompts.analysis;$('settingsSource').textContent = '模型配置来源：' + v.source;
   $('promptSourceDescription').textContent = v.promptSource === 'project'
     ? '当前分析与追问读取项目 Markdown。这里保存的模板会在设置模式下使用。'
     : v.hasSavedPrompt ? '当前分析与追问使用已保存的主提示词。' : '尚未保存主提示词，当前使用项目模板。';}
@@ -385,11 +439,21 @@ async function openSettings(){if(state.busy||state.importBusy){toast('请等待�
 $('settingsBtn').onclick=openSettings;
 $('closeSettings').onclick=()=>$('settingsDialog').close();
 $('settingsDialog').addEventListener('close',()=>{settingsController?.abort();$('modelKey').value='';$('modelKey').type='password';$('toggleKey').textContent='显示';});
-$('modelTab').onclick=()=>switchSettingsTab('model');$('promptTab').onclick=()=>switchSettingsTab('prompt');
-[$('modelTab'),$('promptTab')].forEach((el,i)=>el.onkeydown=e=>{if(['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();switchSettingsTab(i===0?'prompt':'model');$(i===0?'promptTab':'modelTab').focus();}});
+settingsTabs.forEach((name,index) => {
+  const tab = $(name+'Tab');
+  tab.onclick = () => switchSettingsTab(name);
+  tab.onkeydown = event => {
+    if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? settingsTabs.length-1
+      : (index + (event.key === 'ArrowRight' ? 1 : -1) + settingsTabs.length) % settingsTabs.length;
+    switchSettingsTab(settingsTabs[next]);
+    $(settingsTabs[next]+'Tab').focus();
+  };
+});
 $('toggleKey').onclick=()=>{const hidden=$('modelKey').type==='password';$('modelKey').type=hidden?'text':'password';$('toggleKey').textContent=hidden?'隐藏':'显示';$('toggleKey').setAttribute('aria-label',hidden?'隐藏输入的 API Key':'显示输入的 API Key');};
 document.querySelectorAll('[data-reset-prompt]').forEach(el=>el.onclick=()=>{if(!loadedSettings)return;$('analysisPrompt').value=loadedSettings.defaults.analysis;$('promptPreview').hidden=true;$('promptPreviewText').textContent='';toast('已载入项目模板，保存后可在设置模式中使用。');});
-$('settingsForm').onsubmit=async e=>{e.preventDefault();settingError('');settingsBusy(true);try{const v=await api('/api/resume/settings',settingValues());applySettingsToUI(v);state.status={configured:v.apiKeyConfigured,model:v.model,provider:new URL(v.baseURL).hostname};toast('模型与提示词设置已保存。');}catch(e){settingError(e.message||'设置保存失败，请重试。');}finally{settingsBusy(false);}};
+$('settingsForm').onsubmit=async e=>{e.preventDefault();settingError('');settingsBusy(true);try{const v=await api('/api/resume/settings',settingValues());applySettingsToUI(v);state.status={configured:v.apiKeyConfigured,model:v.model,provider:new URL(v.baseURL).hostname};toast('设置已保存。');}catch(e){settingError(e.message||'设置保存失败，请重试。');}finally{settingsBusy(false);}};
 $('testModel').onclick=async()=>{settingError('');settingsBusy(true);settingsController=new AbortController();$('connectionStatus').textContent='正在测试连接…';try{const v=await api('/api/resume/test',settingValues(),{signal:settingsController.signal});$('connectionStatus').textContent=`连接成功 · ${v.model}`;toast('模型连接成功，可以开始 AI 分析。');}catch(e){$('connectionStatus').textContent='';if(e.name!=='AbortError')settingError(e.message||'连接失败，请检查配置。');}finally{settingsController=null;settingsBusy(false);}};
 function renderPromptVariables(variables){
   $('promptVariables').innerHTML=variables.map(v=>`<button type="button" class="variable-token" data-variable="${esc(v.token)}" title="${esc(v.label)}">${esc(v.token)}<span>${esc(v.label)}</span></button>`).join('');
